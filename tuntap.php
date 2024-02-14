@@ -70,7 +70,7 @@
   }
   
   // Try to create a new TAP-Device
-  if (!is_resource ($TAP = tuntap_new (null, TUNTAP_DEVICE_TAP)))
+  if (!is_resource ($TAP = tuntap_new ('')))
     die ('Failed to create TAP-Device' . "\n");
   
   $Interface = tuntap_name ($TAP);

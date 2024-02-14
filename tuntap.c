@@ -29,23 +29,34 @@
 # include <pwd.h>
 # include <grp.h>
 # include <stdio.h>
-# include <fcntl.h>
-# include <sys/ioctl.h>
-# include <linux/if.h>
-# include <linux/if_tun.h>
-  
-# define TUNTAP_DEVICE "/dev/net/tun"
-  
+#include <errno.h>
+// # include <linux/if.h>
+// # include <linux/if_tun.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/kern_control.h>
+#include <net/if.h>
+#include <net/if_utun.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include <sys/sys_domain.h>
+
+// # define TUNTAP_DEVICE "/dev/net/tun"
+// #define UTUN_CONTROL_NAME "com.apple.net.utun_control"
+// #define UTUN_OPT_IFNAME 2
   /* True global resources - no need for thread safety here */
   static int le_tuntap;
   
   // {{{ PHP_MINIT_FUNCTION
   PHP_MINIT_FUNCTION (tuntap) {
     /* Register TUN/TAP Flags */
-    REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_TUN", IFF_TUN, CONST_CS | CONST_PERSISTENT);
-    REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_TAP", IFF_TAP, CONST_CS | CONST_PERSISTENT);
-    REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_NO_PI", IFF_NO_PI, CONST_CS | CONST_PERSISTENT);
-    REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_EXCL", IFF_TUN_EXCL, CONST_CS | CONST_PERSISTENT);
+    // REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_TUN", IFF_TUN, CONST_CS | CONST_PERSISTENT);
+    // REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_TAP", IFF_TAP, CONST_CS | CONST_PERSISTENT);
+    // REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_NO_PI", IFF_NO_PI, CONST_CS | CONST_PERSISTENT);
+    // REGISTER_LONG_CONSTANT ("TUNTAP_DEVICE_EXCL", IFF_TUN_EXCL, CONST_CS | CONST_PERSISTENT);
     
     return SUCCESS;
   }
@@ -79,46 +90,81 @@
     /* Retrive function-parameters */
     char *name;
     size_t name_len;
-    long flags = TUN_TUN_DEV;
     
-    if (zend_parse_parameters (ZEND_NUM_ARGS (), "|sl", &name, &name_len, &flags) == FAILURE)
+    if (zend_parse_parameters (ZEND_NUM_ARGS (), "|s", &name, &name_len) == FAILURE)
       RETURN_FALSE;
     
     /* Try to open TUN/TAP-Device */
     int fd;
-    
-    if ((fd = open (TUNTAP_DEVICE, O_RDWR)) < 0) {
-      zend_error (E_WARNING, "Could not open TUN/TAP-Device");
-      
+    struct ctl_info info;
+
+    memset(&info, 0, sizeof (info));
+
+    fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+
+    // if ((fd = open (TUNTAP_DEVICE, O_RDWR)) < 0) {
+    if (fd < 0) {
+      zend_error (E_WARNING, "Could not open TUN/TAP-Device error");      
       RETURN_FALSE;
     }
+
+	  strncpy(info.ctl_name, UTUN_CONTROL_NAME, strlen(UTUN_CONTROL_NAME));
     
+
     /* Try to create a new network-device */
-    struct ifreq ifr;
-    memset (&ifr, 0, sizeof (ifr));
+    // struct ifreq ifr;
+    // memset (&ifr, 0, sizeof (ifr));
     
-    if ((flags & IFF_TUN) == IFF_TUN)
-      ifr.ifr_flags = IFF_TUN;
-    else if ((flags & IFF_TAP) == IFF_TAP)
-      ifr.ifr_flags = IFF_TAP;
+    // if ((flags & IFF_TUN) == IFF_TUN)
+    //   ifr.ifr_flags = IFF_TUN;
+    // else if ((flags & IFF_TAP) == IFF_TAP)
+    //   ifr.ifr_flags = IFF_TAP;
     
-    if ((flags & IFF_TUN_EXCL) == IFF_TUN_EXCL)
-      ifr.ifr_flags |= IFF_TUN_EXCL;
-    if ((flags & IFF_NO_PI) == IFF_NO_PI)
-      ifr.ifr_flags |= IFF_NO_PI;
+    // if ((flags & IFF_TUN_EXCL) == IFF_TUN_EXCL)
+    //   ifr.ifr_flags |= IFF_TUN_EXCL;
+    // if ((flags & IFF_NO_PI) == IFF_NO_PI)
+    //   ifr.ifr_flags |= IFF_NO_PI;
     
     /*
       IFF_MULTI_QUEUE
       IFF_NOFILTER
     */
     
-    if (name_len)
-      strncpy (ifr.ifr_name, name, (name_len < IFNAMSIZ ? name_len : IFNAMSIZ));
+    // if (name_len)
+    //   strncpy (ifr.ifr_name, name, (name_len < IFNAMSIZ ? name_len : IFNAMSIZ));
     
-    if (ioctl (fd, TUNSETIFF, (void *)&ifr) < 0) {
-      zend_error (E_WARNING, "Failed to setup TUN/TAP-Device");
+    if (name_len)
+      strncpy (info.ctl_name, name, (name_len < IFNAMSIZ ? name_len : IFNAMSIZ));
+    
+    // if (ioctl (fd, TUNSETIFF, (void *)&ifr) < 0) {
+    //   zend_error (E_WARNING, "Failed to setup TUN/TAP-Device");
+    //   close (fd);
+      
+    //   RETURN_FALSE;
+    // }
+    // https://github.com/isotes/tun-open/blob/master/src/tun-open.c
+    int a;
+
+    if ((a=ioctl(fd, CTLIOCGINFO, &info)) < 0)
+    {
+      zend_error (E_WARNING, "%s:%d: failed: %s\n", __FUNCTION__, __LINE__, strerror(errno));
       close (fd);
       
+      RETURN_FALSE;
+    }
+
+    struct sockaddr_ctl addr;
+    bzero(&addr, sizeof(addr));
+    addr.sc_id = info.ctl_id;
+    addr.sc_len = sizeof(addr);
+    addr.sc_family = AF_SYSTEM;
+    addr.ss_sysaddr = AF_SYS_CONTROL;
+    addr.sc_unit = 0; // utunX where X is sc.sc_unit -1
+    int err;
+    err = connect(fd, (struct sockaddr*)&addr, sizeof(addr));
+    if (err < 0) {
+      // this utun is in use
+      zend_error (E_WARNING, "%s:%d: failed: %s\n", __FUNCTION__, __LINE__, strerror(errno));
       RETURN_FALSE;
     }
     
@@ -130,12 +176,12 @@
       
       RETURN_FALSE;
     }
+    printf("fd: %d\n", fd);
     
     php_stream_to_zval (stream, return_value);
   }
   ZEND_BEGIN_ARG_INFO (tuntap_arginfo_new, 0)
     ZEND_ARG_INFO (0, name)
-    ZEND_ARG_INFO (0, flags)
   ZEND_END_ARG_INFO ()
   // }}}
 
@@ -170,18 +216,27 @@
     zval *res;
     int fd;
     
-    if (zend_parse_parameters (ZEND_NUM_ARGS () TSRMLS_CC, "r", &res) == FAILURE)
+    if (zend_parse_parameters (ZEND_NUM_ARGS () , "r", &res) == FAILURE)
       RETURN_FALSE;
     
     TUNTAP_GET_FD (fd, res);
+
+    printf("fd name: %d\n", fd);
     
     /* Retrive information for the stream */
-    struct ifreq ifr;
-    
-    if (ioctl (fd, TUNGETIFF, (void *)&ifr) < 0)
+    // struct ifreq ifr;
+    // struct ctl_info info;
+    // memset(&info, 0, sizeof (info));
+    // char *tunName;
+    char ifname[20];
+    socklen_t ifname_len = sizeof(ifname);
+
+    if (getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, ifname, &ifname_len) < 0) {
+      zend_error (E_WARNING, "Failed to retrive TUN/TAP-Device name");
       RETURN_FALSE;
-    
-    RETURN_STRING (ifr.ifr_name);
+    }
+
+    RETURN_STRING (ifname);
   }
   ZEND_BEGIN_ARG_INFO (tuntap_arginfo_name, 0)
     ZEND_ARG_INFO (0, device)
@@ -199,56 +254,56 @@
    * @access public
    * @return bool
    **/
-  PHP_FUNCTION (tuntap_owner) {
-    /* Retrive function-parameters */
-    zval *device, *user, *group;
-    int fd;   
+  // PHP_FUNCTION (tuntap_owner) {
+  //   /* Retrive function-parameters */
+  //   zval *device, *user, *group;
+  //   int fd;   
     
-    if (zend_parse_parameters (ZEND_NUM_ARGS () TSRMLS_CC, "r|zz", &device, &user, &group) == FAILURE)
-      RETURN_FALSE;
+  //   if (zend_parse_parameters (ZEND_NUM_ARGS () , "r|zz", &device, &user, &group) == FAILURE)
+  //     RETURN_FALSE;
     
-    TUNTAP_GET_FD (fd, device);
+  //   TUNTAP_GET_FD (fd, device);
     
-    /* Try to update owner */
-    int uid = -1;
-    struct passwd *uinfo;
+  //   /* Try to update owner */
+  //   int uid = -1;
+  //   struct passwd *uinfo;
     
-    if (Z_TYPE_P (user) == IS_STRING) {
-      uinfo = getpwnam (Z_STRVAL_P (user));
+  //   if (Z_TYPE_P (user) == IS_STRING) {
+  //     uinfo = getpwnam (Z_STRVAL_P (user));
       
-      if (uinfo)
-        uid = uinfo->pw_uid;
-    } else if (Z_TYPE_P (user) == IS_LONG) {
-      uinfo = getpwuid (Z_LVAL_P (user));
-      uid = Z_LVAL_P (user);
-    }
+  //     if (uinfo)
+  //       uid = uinfo->pw_uid;
+  //   } else if (Z_TYPE_P (user) == IS_LONG) {
+  //     uinfo = getpwuid (Z_LVAL_P (user));
+  //     uid = Z_LVAL_P (user);
+  //   }
     
-    if ((uid >= 0) && (ioctl (fd, TUNSETOWNER, &uid) < 0))
-      RETURN_FALSE;
+  //   if ((uid >= 0) && (ioctl (fd, TUNSETOWNER, &uid) < 0))
+  //     RETURN_FALSE;
     
-    /* Try to update group */
-    int gid = -1;
+  //   /* Try to update group */
+  //   int gid = -1;
     
-    if (Z_TYPE_P (group) == IS_STRING) {
-      struct group *ginfo = getgrnam (Z_STRVAL_P (group));
+  //   if (Z_TYPE_P (group) == IS_STRING) {
+  //     struct group *ginfo = getgrnam (Z_STRVAL_P (group));
       
-      if (ginfo)
-        gid = ginfo->gr_gid;
-    } else if (Z_TYPE_P (group) == IS_LONG)
-      gid = Z_LVAL_P (group);
-    else if (uinfo)
-      gid = uinfo->pw_gid;
+  //     if (ginfo)
+  //       gid = ginfo->gr_gid;
+  //   } else if (Z_TYPE_P (group) == IS_LONG)
+  //     gid = Z_LVAL_P (group);
+  //   else if (uinfo)
+  //     gid = uinfo->pw_gid;
     
-    if ((gid >= 0) && (ioctl (fd, TUNSETGROUP, &gid) < 0))
-      RETURN_FALSE;
+  //   if ((gid >= 0) && (ioctl (fd, TUNSETGROUP, &gid) < 0))
+  //     RETURN_FALSE;
     
-    RETURN_TRUE;
-  }
-  ZEND_BEGIN_ARG_INFO (tuntap_arginfo_owner, 0)
-    ZEND_ARG_INFO (0, device)
-    ZEND_ARG_INFO (0, user)
-    ZEND_ARG_INFO (0, group)
-  ZEND_END_ARG_INFO ()
+  //   RETURN_TRUE;
+  // }
+  // ZEND_BEGIN_ARG_INFO (tuntap_arginfo_owner, 0)
+  //   ZEND_ARG_INFO (0, device)
+  //   ZEND_ARG_INFO (0, user)
+  //   ZEND_ARG_INFO (0, group)
+  // ZEND_END_ARG_INFO ()
   // }}}
   
   // {{{ tuntap_persist
@@ -261,27 +316,27 @@
    * @access public
    * @return bool
    **/
-  PHP_FUNCTION (tuntap_persist) {
-    /* Retrive function-parameters */
-    zval *device;
-    long persist = 1;
-    int fd;
+  // PHP_FUNCTION (tuntap_persist) {
+  //   /* Retrive function-parameters */
+  //   zval *device;
+  //   long persist = 1;
+  //   int fd;
     
-    if (zend_parse_parameters (ZEND_NUM_ARGS () TSRMLS_CC, "r|b", &device, &persist) == FAILURE)
-      RETURN_FALSE;
+  //   if (zend_parse_parameters (ZEND_NUM_ARGS () , "r|b", &device, &persist) == FAILURE)
+  //     RETURN_FALSE;
     
-    TUNTAP_GET_FD (fd, device);
+  //   TUNTAP_GET_FD (fd, device);
     
-    /* Execute ioctl() */
-    if (ioctl (fd, TUNSETPERSIST, &persist) < 0)
-      RETURN_FALSE;
+  //   /* Execute ioctl() */
+  //   if (ioctl (fd, TUNSETPERSIST, &persist) < 0)
+  //     RETURN_FALSE;
     
-    RETURN_TRUE;
-  }
-  ZEND_BEGIN_ARG_INFO (tuntap_arginfo_persist, 0)
-    ZEND_ARG_INFO (0, device)
-    ZEND_ARG_INFO (0, persist)
-  ZEND_END_ARG_INFO ()
+  //   RETURN_TRUE;
+  // }
+  // ZEND_BEGIN_ARG_INFO (tuntap_arginfo_persist, 0)
+  //   ZEND_ARG_INFO (0, device)
+  //   ZEND_ARG_INFO (0, persist)
+  // ZEND_END_ARG_INFO ()
   // }}}
   
   // {{{ tuntap_functions []
@@ -291,8 +346,8 @@
   const zend_function_entry tuntap_functions [] = {
     PHP_FE (tuntap_new, tuntap_arginfo_new)
     PHP_FE (tuntap_name, tuntap_arginfo_name)
-    PHP_FE (tuntap_owner, tuntap_arginfo_owner)
-    PHP_FE (tuntap_persist, tuntap_arginfo_persist)
+    // PHP_FE (tuntap_owner, tuntap_arginfo_owner)
+    // PHP_FE (tuntap_persist, tuntap_arginfo_persist)
     /*
       TUNSETDEBUG - Enable/Disable debugging
       TUNSETLINK - Set Link-Type
