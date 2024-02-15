@@ -176,7 +176,6 @@
       
       RETURN_FALSE;
     }
-    printf("fd: %d\n", fd);
     
     php_stream_to_zval (stream, return_value);
   }
@@ -220,8 +219,6 @@
       RETURN_FALSE;
     
     TUNTAP_GET_FD (fd, res);
-
-    printf("fd name: %d\n", fd);
     
     /* Retrive information for the stream */
     // struct ifreq ifr;
