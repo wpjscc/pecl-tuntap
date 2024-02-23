@@ -170,7 +170,7 @@
     zval *res;
     int fd;
     
-    if (zend_parse_parameters (ZEND_NUM_ARGS () TSRMLS_CC, "r", &res) == FAILURE)
+    if (zend_parse_parameters (ZEND_NUM_ARGS () , "r", &res) == FAILURE)
       RETURN_FALSE;
     
     TUNTAP_GET_FD (fd, res);
@@ -204,7 +204,7 @@
     zval *device, *user, *group;
     int fd;   
     
-    if (zend_parse_parameters (ZEND_NUM_ARGS () TSRMLS_CC, "r|zz", &device, &user, &group) == FAILURE)
+    if (zend_parse_parameters (ZEND_NUM_ARGS () , "r|zz", &device, &user, &group) == FAILURE)
       RETURN_FALSE;
     
     TUNTAP_GET_FD (fd, device);
@@ -267,7 +267,7 @@
     long persist = 1;
     int fd;
     
-    if (zend_parse_parameters (ZEND_NUM_ARGS () TSRMLS_CC, "r|b", &device, &persist) == FAILURE)
+    if (zend_parse_parameters (ZEND_NUM_ARGS () , "r|b", &device, &persist) == FAILURE)
       RETURN_FALSE;
     
     TUNTAP_GET_FD (fd, device);
